@@ -10,7 +10,6 @@ struct FormaPadraoSimplex {
     std::vector<double> b;
     std::vector<double> c;
     std::vector<std::string> variaveis;
-    std::vector<int> indicesBase;
 };
 
 FormaPadraoSimplex montarFormaPadrao(const ProblemaLinear& problema);

@@ -29,6 +29,22 @@ double determinanteLaplace(const vector<vector<double>>& matriz) {
     return det;
 }
 
+vector<vector<double>> transpostaMatriz(const vector<vector<double>>& matriz) {
+    if (matriz.empty()) {
+        return {};
+    }
+
+    vector<vector<double>> transposta(matriz[0].size(), vector<double>(matriz.size(), 0.0));
+
+    for (size_t i = 0; i < matriz.size(); i++) {
+        for (size_t j = 0; j < matriz[i].size(); j++) {
+            transposta[j][i] = matriz[i][j];
+        }
+    }
+
+    return transposta;
+}
+
 vector<vector<double>> inversaMatriz(const vector<vector<double>>& matriz) {
     double determinante = determinanteLaplace(matriz);
     if(abs(determinante) < 1e-9) {
