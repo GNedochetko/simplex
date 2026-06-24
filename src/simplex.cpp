@@ -9,6 +9,8 @@
 
 using namespace std;
 
+const double EPS = 1e-9;
+
 vector<vector<double>> montarMatrizPorColunas(const vector<vector<double>>& matriz, const vector<int>& indicesColunas) {
     // Verificar se a matriz está vazia
     if (matriz.empty()) {
@@ -133,6 +135,22 @@ vector<int> sortearBaseInicial(const vector<vector<double>>& matriz, const vecto
     }
 
     throw runtime_error("Nenhuma base aleatoria gerou uma matriz B inversivel e viavel.");
+}
+
+vector<int> montarBaseInicialComArtificiais(const FormaPadraoSimplex& formaPadrao) {
+    // Inicialmente, a base da Fase I é composta pelas variáveis artificiais
+    vector<int> indicesBase = formaPadrao.indicesArtificiais;
+    int quantidadeRestricoes = static_cast<int>(formaPadrao.A.size());
+
+    if (indicesBase.empty()) {
+        return {};
+    }
+
+    if (static_cast<int>(indicesBase.size()) != quantidadeRestricoes) {
+        throw runtime_error("A quantidade de variaveis artificiais nao corresponde ao numero de restricoes.");
+    }
+
+    return indicesBase;
 }
 
 vector<double> extrairCustos(const vector<double>& c, const vector<int>& indices) {
@@ -262,26 +280,136 @@ int determinarSaidaBase(const vector<double>& xB, const vector<vector<double>>& 
     return posicaoSaida;
 }
 
-void simplex(const FormaPadraoSimplex& formaPadrao){
-    vector<int> indicesBase = sortearBaseInicial(formaPadrao.A, formaPadrao.b);
+vector<int> montarIndicesNaoBase(int quantidadeVariaveis, const vector<int>& indicesBase) {
     vector<int> indicesNaoBase;
-    for (size_t i = 0; i < formaPadrao.variaveis.size(); i++) {
+
+    // Montar os índices das variáveis não básicas a partir do total de variáveis e dos índices das variáveis básicas
+    for (int i = 0; i < quantidadeVariaveis; i++) {
         if (find(indicesBase.begin(), indicesBase.end(), i) == indicesBase.end()) {
-            indicesNaoBase.push_back(static_cast<int>(i));
+            indicesNaoBase.push_back(i);
         }
     }
 
-    vector<vector<double>> A = formaPadrao.A;
-    vector<double> b = formaPadrao.b;
-    vector<double> c = formaPadrao.c;
+    return indicesNaoBase;
+}
+
+bool baseContemArtificial(const vector<int>& indicesBase, const vector<int>& indicesArtificiais) {
+    for (int indiceBase : indicesBase) {
+        if (find(indicesArtificiais.begin(), indicesArtificiais.end(), indiceBase) != indicesArtificiais.end()) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+ResultadoSimplex montarResultadoSimplex(
+    const vector<vector<double>>& A,
+    const vector<double>& b,
+    const vector<double>& c,
+    const vector<int>& indicesBase
+) {
+    // Montar o resultado do Simplex a partir da matriz A, vetor b, vetor c e os índices das variáveis básicas
+    vector<vector<double>> B = montarMatrizPorColunas(A, indicesBase);
+    vector<double> xB = calcularXB(B, b);
+
+    ResultadoSimplex resultado;
+    resultado.indicesBase = indicesBase;
+    resultado.solucao.assign(c.size(), 0.0);
+
+    for (size_t i = 0; i < indicesBase.size(); i++) {
+        resultado.solucao[indicesBase[i]] = xB[i];
+    }
+
+    for (size_t i = 0; i < c.size(); i++) {
+        resultado.valorObjetivo += c[i] * resultado.solucao[i];
+    }
+
+    return resultado;
+}
+
+ResultadoSimplex executarFase1(const FormaPadraoSimplex& formaPadrao) {
+    // Inicialmente, a base da Fase I é composta pelas variáveis artificiais
+    vector<int> indicesBase = montarBaseInicialComArtificiais(formaPadrao);
+    if (indicesBase.empty()) {
+        throw runtime_error("Nao ha variaveis artificiais para executar a Fase I.");
+    }
+
+    // Montar os índices das variáveis não básicas a partir do total de variáveis e dos índices das variáveis básicas
+    vector<int> indicesNaoBase = montarIndicesNaoBase(
+        static_cast<int>(formaPadrao.variaveis.size()),
+        indicesBase
+    );
+
+    // Referências para a matriz A, vetor b e vetor c da forma padrão do problema linear
+    const vector<vector<double>>& A = formaPadrao.A;
+    const vector<double>& b = formaPadrao.b;
+    const vector<double>& c = formaPadrao.c;
+
+    while (true) {
+        // Montar as matrizes B e N a partir da matriz A usando os índices das variáveis básicas e não básicas
+        vector<vector<double>> B = montarMatrizPorColunas(A, indicesBase);
+        vector<vector<double>> N = montarMatrizPorColunas(A, indicesNaoBase);
+        // Calcular x_B = B^(-1) * b
+        vector<double> xB = calcularXB(B, b);
+        // Extrair os custos correspondentes às variáveis básicas e não básicas
+        vector<double> cB = extrairCustos(c, indicesBase);
+        vector<double> cN = extrairCustos(c, indicesNaoBase);
+        // Inversa de B para cálculos futuros
+        vector<vector<double>> inversaB = inversaMatriz(B);
+        // Custos reduzidos para as variáveis não básicas: c_N - lamb^T * N
+        vector<double> custosReduzidos = calcularCustosReduzidos(N, inversaB, cN, cB);
+
+        // Determinar a variável que vai entrar na base
+        int posicaoEntrada = determinarEntradaBase(custosReduzidos);
+        int indiceEntrada = indicesNaoBase[posicaoEntrada];
+
+        // Se o valor do custo reduzido na posição da variável que vai entrar em B for maior ou igual a 0, o loop se encerra
+        if (custosReduzidos[posicaoEntrada] >= -EPS) {
+            ResultadoSimplex resultado = montarResultadoSimplex(A, b, c, indicesBase);
+            resultado.problemaInviavel = resultado.valorObjetivo > EPS;
+            return resultado;
+        }
+
+        // Calcular a direção simplex: y = B^(-1) * A_Nk
+        vector<vector<double>> colunaEntrada = montarMatrizPorColunas(A, {indiceEntrada});
+        vector<vector<double>> direcao(colunaEntrada.size(), vector<double>(1, 0.0));
+        multiplicaMatrizes(inversaB, colunaEntrada, direcao);
+
+        // Determinar qual variável sai da base pelo teste da razão mínima
+        int posicaoSaida = determinarSaidaBase(xB, direcao);
+        if (posicaoSaida == -1) {
+            throw runtime_error("Problema artificial ilimitado na Fase I.");
+        }
+
+        // Enfim ocorre a troca das variáveis...
+        swap(indicesBase[posicaoSaida], indicesNaoBase[posicaoEntrada]);
+    }
+}
+
+ResultadoSimplex executarSimplex(const FormaPadraoSimplex& formaPadrao, const vector<int>& baseInicial) {
+    vector<int> indicesBase = baseInicial;
+    vector<int> indicesNaoBase = montarIndicesNaoBase(
+        static_cast<int>(formaPadrao.variaveis.size()),
+        indicesBase
+    );
+
+    const vector<vector<double>>& A = formaPadrao.A;
+    const vector<double>& b = formaPadrao.b;
+    const vector<double>& c = formaPadrao.c;
 
     while(true){
         // Montar as matrizes B e N a partir da matriz A usando os índices das variáveis básicas e não básicas
         vector<vector<double>> B = montarMatrizPorColunas(A, indicesBase);
-        vector<vector<double>> N = montarMatrizPorColunas(A, indicesNaoBase);
 
         // Calcular x_B = B^(-1) * b
         vector<double> xB = calcularXB(B, b);
+
+        if (indicesNaoBase.empty()) {
+            return montarResultadoSimplex(A, b, c, indicesBase);
+        }
+
+        vector<vector<double>> N = montarMatrizPorColunas(A, indicesNaoBase);
 
         // Extrair os custos correspondentes às variáveis básicas e não básicas
         vector<double> cB = extrairCustos(c, indicesBase);
@@ -298,28 +426,8 @@ void simplex(const FormaPadraoSimplex& formaPadrao){
         int indiceEntrada = indicesNaoBase[posicaoEntrada];
 
         // Se o valor do custo reduzido na posição da variável que vai entrar em B for maior que 0, o loop se encerra
-        if (custosReduzidos[posicaoEntrada] >= 0.0) {
-            vector<double> solucao(c.size(), 0.0);
-
-            for (size_t i = 0; i < indicesBase.size(); i++) {
-                solucao[indicesBase[i]] = xB[i];
-            }
-
-            double valorObjetivo = 0.0;
-
-            for (size_t i = 0; i < c.size(); i++) {
-                valorObjetivo += c[i] * solucao[i];
-            }
-
-            cout << "Solucao otima encontrada:" << endl;
-
-            for (size_t i = 0; i < solucao.size(); i++) {
-                cout << formaPadrao.variaveis[i] << " = " << solucao[i] << endl;
-            }
-
-            cout << "Valor objetivo na forma padrao: " << valorObjetivo << endl;
-
-            break;
+        if (custosReduzidos[posicaoEntrada] >= -EPS) {
+            return montarResultadoSimplex(A, b, c, indicesBase);
         }
 
         // Calcular a direcao simplex: y = B^(-1) * A_Nk
@@ -336,4 +444,81 @@ void simplex(const FormaPadraoSimplex& formaPadrao){
         // Enfim ocorre a troca das variaveis...
         swap(indicesBase[posicaoSaida], indicesNaoBase[posicaoEntrada]);
     }
+}
+
+    std::vector<int> prepararBaseFase2(const FormaPadraoSimplex& formaPadraoOriginal, const vector<int>& baseFase1) {
+        // Inicialmente, a base da Fase II é a mesma da Fase I
+        vector<int> baseFase2 = baseFase1;
+        int quantidadeVariaveisOriginais = static_cast<int>(formaPadraoOriginal.variaveis.size());
+
+        // Para cada variável artificial na base da Fase I, tentamos substituí-la por uma variável original que não esteja na base
+        for (size_t posicaoBase = 0; posicaoBase < baseFase2.size(); posicaoBase++) {
+            // Se a variável na posição da base for uma variável original, não precisamos substituí-la
+            if (baseFase2[posicaoBase] < quantidadeVariaveisOriginais) {
+                continue;
+            }
+
+            // Procurar uma variável original que não esteja na base para substituir a variável artificial
+            bool encontrouSubstituta = false;
+            for (int candidata = 0; candidata < quantidadeVariaveisOriginais; candidata++) {
+                // Se a variável candidata já estiver na base, não podemos usá-la para substituir a variável artificial
+                if (find(baseFase2.begin(), baseFase2.end(), candidata) != baseFase2.end()) {
+                    continue;
+                }
+
+                // Montar uma base candidata substituindo a variável artificial pela variável original candidata  
+                vector<int> baseCandidata = baseFase2;
+                baseCandidata[posicaoBase] = candidata;
+                vector<vector<double>> B = montarMatrizPorColunas(formaPadraoOriginal.A, baseCandidata);
+
+                // Verificar se a matriz B da base candidata é inversível
+                if (!matrizEhInversivel(B)) {
+                    continue;
+                }
+
+                // Calcular x_B da base candidata para verificar se é uma solução básica viável (x_B >= 0)
+                vector<double> xB = calcularXB(B, formaPadraoOriginal.b);
+                if (possuiValorNegativo(xB)) {
+                    continue;
+                }
+
+                baseFase2 = baseCandidata;
+                encontrouSubstituta = true;
+                break;
+            }
+
+            if (!encontrouSubstituta) {
+                throw runtime_error("Nao foi possivel remover uma variavel artificial da base para iniciar a Fase II.");
+            }
+        }
+
+        return baseFase2;
+    }
+
+void imprimirResultadoSimplex(const FormaPadraoSimplex& formaPadrao, const ResultadoSimplex& resultado) {
+    cout << "Solucao otima encontrada:" << endl;
+
+    for (size_t i = 0; i < resultado.solucao.size(); i++) {
+        double valor = abs(resultado.solucao[i]) < EPS ? 0.0 : resultado.solucao[i];
+        cout << formaPadrao.variaveis[i] << " = " << valor << endl;
+    }
+
+    double valorObjetivo = abs(resultado.valorObjetivo) < EPS ? 0.0 : resultado.valorObjetivo;
+    cout << "Valor objetivo na forma padrao: " << valorObjetivo << endl;
+
+    if (formaPadrao.tipoObjetivoOriginal == "max") {
+        double valorObjetivoOriginal = -valorObjetivo;
+        valorObjetivoOriginal = abs(valorObjetivoOriginal) < EPS ? 0.0 : valorObjetivoOriginal;
+        cout << "Valor objetivo original: " << valorObjetivoOriginal << endl;
+    }
+}
+
+void simplex(const FormaPadraoSimplex& formaPadrao){
+    vector<int> indicesBase = montarBaseInicialComArtificiais(formaPadrao);
+    if (indicesBase.empty()) {
+        indicesBase = sortearBaseInicial(formaPadrao.A, formaPadrao.b);
+    }
+
+    ResultadoSimplex resultado = executarSimplex(formaPadrao, indicesBase);
+    imprimirResultadoSimplex(formaPadrao, resultado);
 }

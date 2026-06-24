@@ -6,10 +6,65 @@
 
 using namespace std;
 
+string inverterSinalRestricao(const string& sinal) {
+    // Inverte o sinal da restrição
+    if (sinal == "<") {
+        return ">";
+    }
+
+    if (sinal == "<=") {
+        return ">=";
+    }
+
+    if (sinal == ">") {
+        return "<";
+    }
+
+    if (sinal == ">=") {
+        return "<=";
+    }
+
+    return sinal;
+}
+
+bool fase1EhNecessaria(const ProblemaLinear& problema) {
+    bool precisaFase1 = false;
+    
+    // Verifica se há restrições do tipo ">=", ">" ou "="
+    for (const Restricao& restricao : problema.restricoes) {
+        if (restricao.sinal == ">" || restricao.sinal == ">=" || restricao.sinal == "=") {
+            precisaFase1 = true;
+        }
+    }
+
+    return precisaFase1;
+}
+
+void normalizarRestricoes(ProblemaLinear& problema) {
+    for (Restricao& restricao : problema.restricoes) {
+        // Normaliza as restrições para que o termo independente seja não-negativo
+        if (restricao.termoIndependente >= 0.0) {
+            continue;
+        }
+
+        restricao.termoIndependente *= -1.0;
+        restricao.sinal = inverterSinalRestricao(restricao.sinal);
+
+        for (double& coeficiente : restricao.coeficientes) {
+            coeficiente *= -1.0;
+        }
+
+        for (auto& coeficientePorVariavel : restricao.coeficientesPorVariavel) {
+            coeficientePorVariavel.second *= -1.0;
+        }
+    }
+}
+
 FormaPadraoSimplex montarFormaPadrao(const ProblemaLinear& problema) {
     // Verificar se o tipo de objetivo é válido
     FormaPadraoSimplex formaPadrao;
     double fatorObjetivo = problema.tipoObjetivo == "max" ? -1.0 : 1.0;
+    formaPadrao.tipoObjetivoOriginal = problema.tipoObjetivo;
 
     formaPadrao.variaveis = problema.variaveis;
 
@@ -84,4 +139,33 @@ FormaPadraoSimplex montarFormaPadrao(const ProblemaLinear& problema) {
     }
 
     return formaPadrao;
+}
+
+void adicionarVariaveisArtificiais(FormaPadraoSimplex& formaPadrao) {
+    if (formaPadrao.A.empty()) {
+        return;
+    }
+
+    // Adiciona variáveis artificiais à forma padrão do problema linear
+    int quantidadeRestricoes = static_cast<int>(formaPadrao.A.size());
+    int quantidadeVariaveisOriginais = static_cast<int>(formaPadrao.variaveis.size());
+    formaPadrao.indicesArtificiais.clear();
+
+    for (double& custo : formaPadrao.c) {
+        custo = 0.0;
+    }
+
+    // Adiciona variáveis artificiais à lista de variáveis e ao vetor c
+    for (int i = 0; i < quantidadeRestricoes; i++) {
+        int indiceArtificial = quantidadeVariaveisOriginais + i;
+        formaPadrao.variaveis.push_back("a" + to_string(i + 1));
+        formaPadrao.c.push_back(1.0);
+        formaPadrao.indicesArtificiais.push_back(indiceArtificial);
+    }
+
+    // Redimensiona a matriz A para acomodar as variáveis artificiais
+    for (int i = 0; i < quantidadeRestricoes; i++) {
+        formaPadrao.A[i].resize(quantidadeVariaveisOriginais + quantidadeRestricoes, 0.0);
+        formaPadrao.A[i][quantidadeVariaveisOriginais + i] = 1.0;
+    }
 }

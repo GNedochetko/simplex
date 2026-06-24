@@ -1,3 +1,4 @@
+#include <cmath>
 #include <iostream>
 #include <vector>
 #include "../include/utils.hpp"
@@ -46,49 +47,63 @@ vector<vector<double>> transpostaMatriz(const vector<vector<double>>& matriz) {
 }
 
 vector<vector<double>> inversaMatriz(const vector<vector<double>>& matriz) {
-    double determinante = determinanteLaplace(matriz);
-    if(abs(determinante) < 1e-9) {
-        cout << "Erro: A matriz é singular e não possui inversa." << endl;
+    if (matriz.empty() || matriz.size() != matriz[0].size()) {
+        cout << "Erro: A matriz deve ser quadrada para calcular a inversa." << endl;
         return {};
     }
+
     size_t n = matriz.size();
-    vector<vector<double>> identidade(n, vector<double>(n, 0.0));
-    for(size_t i = 0; i < identidade[0].size(); i++){
-        for(size_t j = 0; j < identidade.size(); j++){
-            if(i == j){
-                identidade[i][j] = 1;
-            }else{
-                identidade[i][j] = 0;
+    vector<vector<double>> matrizAumentada(n, vector<double>(2 * n, 0.0));
+
+    for (size_t i = 0; i < n; i++) {
+        for (size_t j = 0; j < n; j++) {
+            matrizAumentada[i][j] = matriz[i][j];
+        }
+
+        matrizAumentada[i][n + i] = 1.0;
+    }
+
+    for (size_t coluna = 0; coluna < n; coluna++) {
+        size_t linhaPivo = coluna;
+        for (size_t linha = coluna + 1; linha < n; linha++) {
+            if (abs(matrizAumentada[linha][coluna]) > abs(matrizAumentada[linhaPivo][coluna])) {
+                linhaPivo = linha;
+            }
+        }
+
+        if (abs(matrizAumentada[linhaPivo][coluna]) < 1e-9) {
+            cout << "Erro: A matriz é singular e não possui inversa." << endl;
+            return {};
+        }
+
+        if (linhaPivo != coluna) {
+            swap(matrizAumentada[linhaPivo], matrizAumentada[coluna]);
+        }
+
+        double pivo = matrizAumentada[coluna][coluna];
+        for (size_t j = 0; j < 2 * n; j++) {
+            matrizAumentada[coluna][j] /= pivo;
+        }
+
+        for (size_t linha = 0; linha < n; linha++) {
+            if (linha == coluna) {
+                continue;
+            }
+
+            double fator = matrizAumentada[linha][coluna];
+            for (size_t j = 0; j < 2 * n; j++) {
+                matrizAumentada[linha][j] -= fator * matrizAumentada[coluna][j];
             }
         }
     }
-    vector<vector<double>> matrizAumentada = matriz;
-    for (size_t i = 0; i < matriz.size(); i++) {
-        matrizAumentada[i].insert(matrizAumentada[i].end(), identidade[i].begin(), identidade[i].end());
-    }
-    for(size_t i = 0; i < matrizAumentada.size(); i++){
-        size_t pivo = i;
-        for(size_t j = 0; j < matrizAumentada.size(); j++){
-            if(i != j){
-                double fator = matrizAumentada[j][pivo] / matrizAumentada[pivo][pivo];
-                for(size_t k = 0; k < matrizAumentada[0].size(); k++){
-                    matrizAumentada[j][k] -= fator * matrizAumentada[pivo][k];
-                }
-            }
-        }
-    }
-    for(size_t i = 0; i < matrizAumentada.size(); i++){
-        double pivo = matrizAumentada[i][i];
-        for(size_t j = 0; j < matrizAumentada[0].size(); j++){
-            matrizAumentada[i][j] /= pivo;
-        }
-    }
+
     vector<vector<double>> inversa(n, vector<double>(n, 0.0));
-    for(size_t i = 0; i < inversa.size(); i++){
-        for(size_t j = 0; j < inversa[i].size(); j++){
-            inversa[i][j] = matrizAumentada[i][j + n];
+    for (size_t i = 0; i < n; i++) {
+        for (size_t j = 0; j < n; j++) {
+            inversa[i][j] = matrizAumentada[i][n + j];
         }
     }
+
     return inversa;
 }
 
